@@ -1,0 +1,142 @@
+
+def createRefColumn(dataframe: DataFrame,hadoopFS: FileSystem): DataFrame = {
+    var existingRefColumn: List[String] = null
+    var existingRefValue: List[String] = null
+    var refDF: DataFrame = null
+    if (hadoopFS.exists(new Path(tranformationControlfileHdfsPath))) {
+      refDF = spark.read.json(tranformationControlfileHdfsPath)
+      println("Existing DF!!!")
+      refDF.show(false)
+      existingRefColumn = refDF.columns.toList
+      existingRefValue = refDF.collect.map(_.toSeq).flatten.toList.asInstanceOf[List[String]]
+
+    }
+    val jsonObj =  new JsonObject()
+    val columns = dataframe.columns;
+    var df2 = dataframe
+
+    var nums: List[String] = List()
+    for (i <- 0 to columns.length - 1) {
+      var counter = 1L;
+      if (nums.contains(columns(i).toLowerCase())) {
+        val originalCol = columns(i)
+        var colName = columns(i).toLowerCase()
+       // df2 = df2.withColumnRenamed(originalCol, colName)
+       // nums = nums :+ colName
+        println("CONTAINS DUPLICATE COLUMNS !!!"+colName)
+        if(existingRefColumn!= null && existingRefColumn.contains(originalCol.toLowerCase()+"next") ){
+          counter = refDF.agg(max(originalCol.toLowerCase+"next")).take(1)(0).get(0).asInstanceOf[Long]
+          println("1 :"+counter)
+          println(refDF.agg(max(originalCol.toLowerCase+"next")).take(1)(0).get(0))
+        }
+        if(jsonObj.get(originalCol.toLowerCase()+"next") != null){
+          counter = jsonObj.get(originalCol.toLowerCase()+"next").getAsLong
+        }
+         colName = colName + counter
+
+        if(hadoopFS.exists(new Path(tranformationControlfileHdfsPath))) {
+          println("tranformationControlfileHdfsPath Exist !!!")
+          if(!existingRefColumn.contains(originalCol)) {
+
+            if(existingRefValue.contains(colName)){
+              jsonObj.addProperty(originalCol,colName )
+              jsonObj.addProperty(originalCol.toLowerCase()+"next", counter + 1)
+
+            }else{
+              jsonObj.addProperty(originalCol,colName )
+              jsonObj.addProperty(originalCol.toLowerCase()+"next",counter + 1 )
+
+            }
+          }
+        }else{
+          counter =  counter + 1
+          jsonObj.addProperty(originalCol,colName )
+          jsonObj.addProperty(originalCol.toLowerCase()+"next", counter)
+
+        }
+        println("ORIGINAL COLUMN !!!!"+ originalCol + " RENAMED COLUMN !!!!"+colName)
+        df2 = df2.withColumnRenamed(originalCol, colName)
+        nums = nums :+ colName
+      } else {
+        val originalCol = columns(i)
+        var colName = columns(i).toLowerCase()
+
+
+        if( existingRefColumn!= null && existingRefColumn.contains(originalCol.toLowerCase()+"next") ){
+          counter = refDF.agg(max(originalCol.toLowerCase+"next")).take(1)(0).get(0).asInstanceOf[Long]
+        }
+        if(jsonObj.get(originalCol.toLowerCase()+"next") != null){
+          counter = jsonObj.get(originalCol.toLowerCase()+"next").getAsLong
+        }
+        if(hadoopFS.exists(new Path(tranformationControlfileHdfsPath))) {
+          if(!existingRefColumn.contains(originalCol)) {
+            if(existingRefValue.contains(colName)){
+              colName = colName+counter
+              counter = counter + 1
+              jsonObj.addProperty(originalCol,colName )
+              jsonObj.addProperty(originalCol.toLowerCase()+"next", counter + 1)
+
+            }else{
+              counter = counter + 1
+              jsonObj.addProperty(originalCol,colName )
+              jsonObj.addProperty(originalCol.toLowerCase()+"next", counter)
+
+            }
+          }
+        }else{
+          jsonObj.addProperty(originalCol,colName )
+          jsonObj.addProperty(originalCol.toLowerCase()+"next", counter)
+
+        }
+        df2 = df2.withColumnRenamed(originalCol,colName )
+        nums = nums :+ colName
+      }
+
+
+    }
+    println("tranformationControlfileHdfsPath 1111: " + jsonObj)
+    println("tranformationControlfileHdfsPath 2222: " + jsonObj.entrySet())
+    println("tranformationControlfileHdfsPath 3333: " + jsonObj.entrySet().isEmpty)
+    println("tranformationControlfileHdfsPath 4444: " + tranformationControlfileHdfsPath)
+    if(!jsonObj.entrySet().isEmpty) {
+      println("tranformationControlfileHdfsPath 5555: " + jsonObj.entrySet().isEmpty)
+      var fileOutputStream: FSDataOutputStream = null;
+
+      try {
+        if (hadoopFS.exists(new Path(tranformationControlfileHdfsPath))) {
+          fileOutputStream = hadoopFS.append(new Path(tranformationControlfileHdfsPath));
+          println("tranformationControlfileHdfsPath append: " + tranformationControlfileHdfsPath)
+          println("tranformationControlfileHdfsPath append: " + jsonObj)
+
+          val writer = new PrintWriter(fileOutputStream)
+          try{
+            writer.write(jsonObj.toString)
+            writer.write("\n")
+          }finally {
+            writer.close()
+            println("writer closed!!!!")
+          }
+        } else {
+          fileOutputStream = hadoopFS.create(new Path(tranformationControlfileHdfsPath));
+          println("tranformationControlfileHdfsPath create: " + tranformationControlfileHdfsPath)
+          println("tranformationControlfileHdfsPath create: " + jsonObj)
+          val writer = new PrintWriter(fileOutputStream)
+          try{
+            writer.write(jsonObj.toString)
+            writer.write("\n")
+          }finally {
+            writer.close()
+            println("writer closed!!!!")
+          }
+        }
+      } finally {
+        if (hadoopFS != null) {
+          hadoopFS.close();
+        }
+        if (fileOutputStream != null) {
+          fileOutputStream.close();
+        }
+      }
+    }
+    df2
+  }
